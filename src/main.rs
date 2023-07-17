@@ -47,9 +47,7 @@ async fn serve_mp3_file(data: web::Data<Mutex<AppState>>) -> impl Responder {
 }
 
 #[get("/file.m3u")]
-async fn serve_m3u_playlist(data: web::Data<Mutex<AppState>>, req: actix_web::HttpRequest) -> impl Responder {
-    let mut state = data.lock().await;
-    
+async fn serve_m3u_playlist(req: actix_web::HttpRequest) -> impl Responder {
     let mp3_files = scan_directory(Path::new("./mp3-files")).unwrap();
 
     if mp3_files.is_empty() {
