@@ -7,7 +7,6 @@ use tokio::sync::Mutex;
 use serde::Serialize;
 use actix_files::NamedFile;
 use std::collections::VecDeque;
-use std::collections::HashMap;
 
 use urlencoding::decode;
 use actix_web::HttpRequest;
@@ -219,7 +218,6 @@ async fn download_mp3_file(req: HttpRequest) -> Result<NamedFile> {
 use std::sync::Arc;
 use std::sync::RwLock;
 
-
 #[derive(Default)]
 struct AppState {
     mp3_files: Arc<RwLock<Vec<PathBuf>>>,
@@ -259,7 +257,7 @@ async fn scan_directory(directory: &Path) -> std::io::Result<Vec<PathBuf>> {
 async fn show_radio_m3u(
     req: actix_web::HttpRequest,
     path: web::Path<(String,)>,
-    data: web::Data<AppState>,
+    data: web::Data<AppState>
 ) -> impl Responder {
     let file_path = format!("{}", path.into_inner().0);
     let full_path = format!("./{}", file_path);
@@ -301,10 +299,7 @@ async fn show_radio_m3u(
 
     HttpResponse::Ok()
         .content_type("audio/mpegurl")
-        .append_header((
-            "Content-Disposition",
-            format!(r#"attachment; filename="file.m3u""#),
-        ))
+        .append_header(("Content-Disposition", format!(r#"attachment; filename="file.m3u""#)))
         .body(playlist)
 }
 
@@ -328,7 +323,7 @@ async fn show_radio_mp3(data: web::Data<AppState>) -> impl Responder {
 
     let file_path = &mp3_files[*current_file_index];
     let file_name = file_path.file_name().unwrap_or_default();
-    let mut file = match tokio::fs::File::open(file_path).await {
+    let mut file = match File::open(file_path).await {
         Ok(file) => file,
         Err(_) => {
             return HttpResponse::InternalServerError().finish();
@@ -348,10 +343,7 @@ async fn show_radio_mp3(data: web::Data<AppState>) -> impl Responder {
             "Content-Disposition",
             format!(r#"attachment; filename="{}""#, file_name.to_string_lossy()),
         ))
-        .append_header((
-            "icy-name",
-            format!(r#"Radio-NP - {}"#, file_name.to_string_lossy()),
-        ))
+        .append_header(("icy-name", format!(r#"Radio-NP - {}"#, file_name.to_string_lossy())))
         .append_header(("icy-description", format!(r#"Radio-NP"#)))
         .body(contents);
 
@@ -368,15 +360,13 @@ async fn main() -> std::io::Result<()> {
     });
 
     HttpServer::new(move || {
-        App::new()
-            .app_data(app_state.clone())
-            .service(show_radio_m3u)
-            .service(show_radio_mp3)
-            .service(show_folder_tree)
+        App::new().app_data(app_state.clone())
+        .service(show_radio_m3u)
+        .service(show_radio_mp3)
+        .service(show_folder_tree)
     })
-    .bind("0.0.0.0:3000")?
-    .run()
-    .await
+        .bind("0.0.0.0:3000")?
+        .run().await
 }
 
 fn generate_m3u_playlist(mp3_files: &[std::path::PathBuf]) -> String {
