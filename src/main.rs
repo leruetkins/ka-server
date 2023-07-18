@@ -218,10 +218,18 @@ async fn download_mp3_file(req: HttpRequest) -> Result<NamedFile> {
 use std::sync::Arc;
 use std::sync::RwLock;
 
+use std::collections::HashMap;
+
+
 #[derive(Default)]
 struct AppState {
-    mp3_files: Arc<RwLock<Vec<PathBuf>>>,
-    current_file_index: Arc<RwLock<usize>>,
+    client_data: Arc<RwLock<HashMap<String, ClientData>>>,
+}
+
+#[derive(Default)]
+struct ClientData {
+    mp3_files: Vec<PathBuf>,
+    current_file_index: usize,
 }
 
 async fn scan_directory(directory: &Path) -> std::io::Result<Vec<PathBuf>> {
@@ -257,18 +265,24 @@ async fn scan_directory(directory: &Path) -> std::io::Result<Vec<PathBuf>> {
 async fn show_radio_m3u(
     req: actix_web::HttpRequest,
     path: web::Path<(String,)>,
-    data: web::Data<AppState>
+    data: web::Data<AppState>,
 ) -> impl Responder {
     let file_path = format!("{}", path.into_inner().0);
     let full_path = format!("./{}", file_path);
     println!("Radio Playlist");
-    println!("File Path: {}", full_path); // Print the file path for debugging
+    println!("File Path: {}", full_path); // Вывод пути файла для отладки
 
     let mp3_files = scan_directory(Path::new(&full_path)).await.unwrap();
 
-    // Получите доступ к состоянию приложения и обновите mp3_files
-    let mut state = data.mp3_files.write().unwrap();
-    *state = mp3_files.clone();
+    // Получение IP-адреса клиента
+    let remote_addr = req.connection_info().remote_addr().unwrap_or("Unknown").to_owned();
+
+    // Получение клиентских данных
+    let mut client_data = data.client_data.write().unwrap();
+    let data = client_data.entry(remote_addr.clone()).or_insert_with(Default::default);
+
+    // Обновление клиентских данных
+    data.mp3_files = mp3_files.clone();
 
     if mp3_files.is_empty() {
         return HttpResponse::NotFound().body("No MP3 files found");
@@ -291,31 +305,39 @@ async fn show_radio_m3u(
 
     let playlist = format!(
         "#EXTM3U\n#EXTINF:-1,File\nhttp://{}:3000/{}.radio.mp3",
-        host,
-        file_path
+        host, file_path
     );
 
-    println!("Sending M3U");
+    println!("Sending M3U to client: {}", remote_addr); // Отображение IP-адреса клиента
 
     HttpResponse::Ok()
         .content_type("audio/mpegurl")
         .append_header(("Content-Disposition", format!(r#"attachment; filename="file.m3u""#)))
+        .append_header(("X-Client-ID", remote_addr.clone())) // Добавление IP-адреса клиента в заголовки ответа
         .body(playlist)
 }
 
 #[get("/{path:.+}.radio.mp3")]
-async fn show_radio_mp3(data: web::Data<AppState>) -> impl Responder {
+async fn show_radio_mp3(
+    req: actix_web::HttpRequest,
+    data: web::Data<AppState>,
+) -> impl Responder {
     println!("Radio mp3");
 
-    let mp3_files = data.mp3_files.read().unwrap();
-    let mut current_file_index = data.current_file_index.write().unwrap();
+    // Получение IP-адреса клиента
+    let remote_addr = req.connection_info().remote_addr().unwrap_or("Unknown").to_owned();
 
-    println!("Current file index: {}", *current_file_index);
-    // println!("MP3 files:");
+    // Получение клиентских данных
+    let mut client_data = data.client_data.write().unwrap();
+    let data = match client_data.get_mut(&remote_addr) {
+        Some(data) => data,
+        None => return HttpResponse::NotFound().body("No client data found"),
+    };
 
-    // for (index, file_path) in mp3_files.iter().enumerate() {
-    //     println!("{}: {:?}", index, file_path);
-    // }
+    let mp3_files = &data.mp3_files;
+    let current_file_index = &mut data.current_file_index;
+
+    println!("Current file index: {}", current_file_index);
 
     if mp3_files.is_empty() {
         return HttpResponse::NotFound().body("No MP3 files found");
@@ -323,7 +345,7 @@ async fn show_radio_mp3(data: web::Data<AppState>) -> impl Responder {
 
     let file_path = &mp3_files[*current_file_index];
     let file_name = file_path.file_name().unwrap_or_default();
-    let mut file = match File::open(file_path).await {
+    let mut file = match tokio::fs::File::open(file_path).await {
         Ok(file) => file,
         Err(_) => {
             return HttpResponse::InternalServerError().finish();
@@ -335,7 +357,7 @@ async fn show_radio_mp3(data: web::Data<AppState>) -> impl Responder {
         return HttpResponse::InternalServerError().finish();
     }
 
-    println!("Sending file: {:?}", file_name);
+    println!("Sending file: {:?} to client: {}", file_name, remote_addr);
 
     let response = HttpResponse::Ok()
         .content_type("audio/mpeg")
@@ -345,6 +367,7 @@ async fn show_radio_mp3(data: web::Data<AppState>) -> impl Responder {
         ))
         .append_header(("icy-name", format!(r#"Radio-NP - {}"#, file_name.to_string_lossy())))
         .append_header(("icy-description", format!(r#"Radio-NP"#)))
+        .append_header(("X-Client-ID", remote_addr.clone())) // Добавление IP-адреса клиента в заголовки ответа
         .body(contents);
 
     *current_file_index = (*current_file_index + 1) % mp3_files.len();
@@ -352,22 +375,26 @@ async fn show_radio_mp3(data: web::Data<AppState>) -> impl Responder {
     response
 }
 
+
+
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let app_state = web::Data::new(AppState {
-        mp3_files: Arc::new(RwLock::new(Vec::new())),
-        current_file_index: Arc::new(RwLock::new(0)),
+        client_data: Arc::new(RwLock::new(HashMap::new())),
     });
 
     HttpServer::new(move || {
         App::new().app_data(app_state.clone())
-        .service(show_radio_m3u)
-        .service(show_radio_mp3)
-        .service(show_folder_tree)
+            .service(show_radio_m3u)
+            .service(show_radio_mp3)
+            .service(show_folder_tree)
     })
-        .bind("0.0.0.0:3000")?
-        .run().await
+    .bind("0.0.0.0:3000")?
+    .run()
+    .await
 }
+
 
 fn generate_m3u_playlist(mp3_files: &[std::path::PathBuf]) -> String {
     let mut playlist = String::new();
