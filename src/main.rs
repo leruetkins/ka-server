@@ -311,11 +311,11 @@ async fn show_radio_mp3(data: web::Data<AppState>) -> impl Responder {
     let mut current_file_index = data.current_file_index.write().unwrap();
 
     println!("Current file index: {}", *current_file_index);
-    println!("MP3 files:");
+    // println!("MP3 files:");
 
-    for (index, file_path) in mp3_files.iter().enumerate() {
-        println!("{}: {:?}", index, file_path);
-    }
+    // for (index, file_path) in mp3_files.iter().enumerate() {
+    //     println!("{}: {:?}", index, file_path);
+    // }
 
     if mp3_files.is_empty() {
         return HttpResponse::NotFound().body("No MP3 files found");
