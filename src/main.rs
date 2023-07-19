@@ -253,6 +253,7 @@ async fn scan_directory(directory: &Path) -> std::io::Result<Vec<PathBuf>> {
         }
     }
 
+    mp3_files.sort();
     println!("Scanned MP3 files:");
     for file_path in &mp3_files {
         println!("{:?}", file_path);
