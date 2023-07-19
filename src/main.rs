@@ -53,28 +53,46 @@ fn scan_directory_tree(directory: &std::path::Path) -> actix_web::Result<FolderN
 
 fn generate_html(folder_tree: &FolderNode) -> String {
     let mut html = String::new();
-
-    // Generate the complete HTML structure
+  
     html.push_str("<!DOCTYPE html>");
     html.push_str("<html>");
+    
     html.push_str("<head>");
-    html.push_str("<meta charset=\"UTF-8\">");
-    html.push_str("<title>Your Page Title</title>");
-    // Add any other required <meta>, <link>, or <style> tags to the <head> section
+    html.push_str("<meta charset='UTF-8'>");
+    html.push_str("<meta name='viewport' content='width=device-width, initial-scale=1'>"); 
+    html.push_str("<title>Media Server</title>");
+  
+    html.push_str("<style>"); 
+    html.push_str("@media (max-width: 768px) {");
+    html.push_str("  .flex-container {");
+    html.push_str("    flex-direction: column;");
+    html.push_str("  }");
+    html.push_str("}");
+    html.push_str("</style>");
+  
     html.push_str("</head>");
+    
     html.push_str("<body>");
-
-    // Generate the folder tree content
+  
+    html.push_str("<div class='flex-container'>");
+  
+    html.push_str("<div class='folder-tree'>");
     html.push_str("<ul>");
     html.push_str(&generate_folder_node_html(folder_tree, ""));
-
     html.push_str("</ul>");
-
+    html.push_str("</div>");
+  
+    html.push_str("<div class='file-list'>");
+    // здесь вывод списка файлов
+    html.push_str("</div>");
+    
+    html.push_str("</div>");
+  
     html.push_str("</body>");
     html.push_str("</html>");
-
+  
     html
-}
+  }
 
 fn generate_folder_node_html(folder_node: &FolderNode, parent_path: &str) -> String {
     let mut html = String::new();
