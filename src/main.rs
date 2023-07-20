@@ -274,7 +274,9 @@ async fn scan_directory(directory: &Path) -> std::io::Result<Vec<PathBuf>> {
     mp3_files.sort();
     println!("Scanned MP3 files:");
     for file_path in &mp3_files {
-        println!("{:?}", file_path);
+        // Convert the path to a string and replace backslashes with forward slashes
+        let normalized_path = file_path.to_string_lossy().replace("\\", "/");
+        println!("{}", normalized_path);
     }
 
     Ok(mp3_files)
