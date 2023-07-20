@@ -1,15 +1,20 @@
 use actix_web::{ get, web, App, HttpResponse, HttpServer, Responder, Result };
 use std::fs;
 use std::path::{ Path, PathBuf };
-use tokio::fs::File;
 use tokio::io::AsyncReadExt;
-use tokio::sync::Mutex;
 use serde::Serialize;
 use actix_files::NamedFile;
 use std::collections::VecDeque;
 
 use urlencoding::decode;
 use actix_web::HttpRequest;
+
+use std::sync::Arc;
+use std::sync::RwLock;
+
+use std::collections::HashMap;
+
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Serialize)]
 struct FolderTree {
@@ -53,46 +58,46 @@ fn scan_directory_tree(directory: &std::path::Path) -> actix_web::Result<FolderN
 
 fn generate_html(folder_tree: &FolderNode) -> String {
     let mut html = String::new();
-  
+
     html.push_str("<!DOCTYPE html>");
     html.push_str("<html>");
-    
+
     html.push_str("<head>");
     html.push_str("<meta charset='UTF-8'>");
-    html.push_str("<meta name='viewport' content='width=device-width, initial-scale=1'>"); 
+    html.push_str("<meta name='viewport' content='width=device-width, initial-scale=1'>");
     html.push_str("<title>Media Server</title>");
-  
-    html.push_str("<style>"); 
+
+    html.push_str("<style>");
     html.push_str("@media (max-width: 768px) {");
     html.push_str("  .flex-container {");
     html.push_str("    flex-direction: column;");
     html.push_str("  }");
     html.push_str("}");
     html.push_str("</style>");
-  
+
     html.push_str("</head>");
-    
+
     html.push_str("<body>");
-  
+
     html.push_str("<div class='flex-container'>");
-  
+
     html.push_str("<div class='folder-tree'>");
     html.push_str("<ul>");
     html.push_str(&generate_folder_node_html(folder_tree, ""));
     html.push_str("</ul>");
     html.push_str("</div>");
-  
+
     html.push_str("<div class='file-list'>");
     // здесь вывод списка файлов
     html.push_str("</div>");
-    
+
     html.push_str("</div>");
-  
+
     html.push_str("</body>");
     html.push_str("</html>");
-  
+
     html
-  }
+}
 
 fn generate_folder_node_html(folder_node: &FolderNode, parent_path: &str) -> String {
     let mut html = String::new();
@@ -233,11 +238,6 @@ async fn download_mp3_file(req: HttpRequest) -> Result<NamedFile> {
         Err(actix_web::error::ErrorNotFound("File not found"))
     }
 }
-use std::sync::Arc;
-use std::sync::RwLock;
-
-use std::collections::HashMap;
-
 
 #[derive(Default)]
 struct AppState {
@@ -284,7 +284,7 @@ async fn scan_directory(directory: &Path) -> std::io::Result<Vec<PathBuf>> {
 async fn show_radio_m3u(
     req: actix_web::HttpRequest,
     path: web::Path<(String,)>,
-    data: web::Data<AppState>,
+    data: web::Data<AppState>
 ) -> impl Responder {
     let file_path = format!("{}", path.into_inner().0);
     let full_path = format!("./{}", file_path);
@@ -294,7 +294,7 @@ async fn show_radio_m3u(
     let mp3_files = scan_directory(Path::new(&full_path)).await.unwrap();
 
     // Получение IP-адреса клиента
-    let remote_addr = req.connection_info().remote_addr().unwrap_or("Unknown").to_owned();
+    let remote_addr = req.connection_info().peer_addr().unwrap_or("Unknown").to_owned();
 
     // Получение клиентских данных
     let mut client_data = data.client_data.write().unwrap();
@@ -320,11 +320,21 @@ async fn show_radio_m3u(
         })
         .unwrap_or_default();
 
-    println!("{}!", host);
+    // println!("{}!", host);
+
+    // Get user agent header and convert it to a string
+    let user_agent = req
+        .headers()
+        .get("user-agent")
+        .and_then(|ua| ua.to_str().ok())
+        .unwrap_or("Unknown User Agent");
+
+    println!("User Agent: {}", user_agent);
 
     let playlist = format!(
         "#EXTM3U\n#EXTINF:-1,File\nhttp://{}:3000/{}.radio.mp3",
-        host, file_path
+        host,
+        file_path
     );
 
     println!("Sending M3U to client: {}", remote_addr); // Отображение IP-адреса клиента
@@ -337,24 +347,27 @@ async fn show_radio_m3u(
 }
 
 #[get("/{path:.+}.radio.mp3")]
-async fn show_radio_mp3(
-    req: actix_web::HttpRequest,
-    data: web::Data<AppState>,
-) -> impl Responder {
+async fn show_radio_mp3(req: actix_web::HttpRequest, data: web::Data<AppState>) -> impl Responder {
     println!("Radio mp3");
 
     // Получение IP-адреса клиента
-    let remote_addr = req.connection_info().remote_addr().unwrap_or("Unknown").to_owned();
+    let remote_addr = req.connection_info().peer_addr().unwrap_or("Unknown").to_owned();
 
     // Получение клиентских данных
     let mut client_data = data.client_data.write().unwrap();
     let data = match client_data.get_mut(&remote_addr) {
         Some(data) => data,
-        None => return HttpResponse::NotFound().body("No client data found"),
+        None => {
+            return HttpResponse::NotFound().body("No client data found");
+        }
     };
 
     let mp3_files = &data.mp3_files;
     let current_file_index = &mut data.current_file_index;
+
+    if current_file_index > &mut mp3_files.len() {
+        *current_file_index = 0;
+    }
 
     println!("Current file index: {}", current_file_index);
 
@@ -394,26 +407,23 @@ async fn show_radio_mp3(
     response
 }
 
-
-
-
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    println!("ka-server {}. ©All rights in reserve.", APP_VERSION);
     let app_state = web::Data::new(AppState {
         client_data: Arc::new(RwLock::new(HashMap::new())),
     });
 
     HttpServer::new(move || {
-        App::new().app_data(app_state.clone())
+        App::new()
+            .app_data(app_state.clone())
             .service(show_radio_m3u)
             .service(show_radio_mp3)
             .service(show_folder_tree)
     })
-    .bind("0.0.0.0:3000")?
-    .run()
-    .await
+        .bind("0.0.0.0:3000")?
+        .run().await
 }
-
 
 fn generate_m3u_playlist(mp3_files: &[std::path::PathBuf]) -> String {
     let mut playlist = String::new();
